@@ -36,8 +36,17 @@ def main():
     os.chmod(outdir, 0o700)  # 事件含聊天正文与联系人标识，仅属主可读
     files = []
     event_ids = []
+    rejected = 0
     for ev in events:
-        eid = ev.get("event_id") or ev.get("message_id") or "unknown"
+        eid = ev.get("event_id") or ev.get("message_id")
+        if not eid or not isinstance(eid, str) or not eid.strip():
+            # 缺失/非法 ID：拒绝落盘，不伪造同一个 "unknown" ID 导致互相覆盖。
+            # 正常上游协议必带 event_id，此为异常输入。
+            rejected += 1
+            print(f"WARN: event missing event_id/message_id, rejected: {str(ev)[:200]}",
+                  file=sys.stderr)
+            continue
+        eid = eid.strip()
         event_ids.append(eid)
         fname = eid.replace(":", "_").replace("/", "_") + ".json"
         path = os.path.join(outdir, fname)
@@ -51,7 +60,7 @@ def main():
         os.replace(tmp, path)
         files.append(path)
     print(json.dumps({"files": files, "event_ids": event_ids,
-                      "count": len(files)}, ensure_ascii=False))
+                      "count": len(files), "rejected": rejected}, ensure_ascii=False))
 
 
 main()

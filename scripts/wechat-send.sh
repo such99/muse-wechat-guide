@@ -119,12 +119,22 @@ EOF
 }
 
 # 1) 幂等：历史上出现过 sent，直接拒绝重发（--retry-unknown 也不放行）。
-if [ "$(ever_sent)" = "yes" ]; then
+# 历史读取失败时禁止发送（转人工核查），不能当作"无历史"继续。
+ES_OUT=$(ever_sent); ES_RC=$?
+if [ "$ES_RC" -ne 0 ] || { [ "$ES_OUT" != "yes" ] && [ "$ES_OUT" != "no" ]; }; then
+  echo "FATAL: cannot read send history (exit=$ES_RC); refusing to send, escalate." >&2
+  exit 2
+fi
+if [ "$ES_OUT" = "yes" ]; then
   jlog "skipped" "key already sent before; refusing duplicate"
   echo "SKIP: $KEY already has a sent record" >&2
   exit 0
 fi
-LS=$(last_state)
+LS=$(last_state); LS_RC=$?
+if [ "$LS_RC" -ne 0 ]; then
+  echo "FATAL: cannot read last send state (exit=$LS_RC); refusing to send, escalate." >&2
+  exit 2
+fi
 
 # 2) 恢复：最后一条是 sending（进程死在发送中），转 unknown，禁止重发。
 if [ "$LS" = "sending" ]; then
@@ -159,8 +169,9 @@ if [ -f "$HOME/.config/wx-bot/env" ]; then
 fi
 
 ERR_FILE="$STATE_DIR/.send-${KEY//[^A-Za-z0-9_-]/_}.err"
+# 超时：文本 60 秒；图片按上游媒体预算给 600 秒（弱网大图避免过早进 unknown）。
 if [ "$MODE" = "image" ]; then
-  timeout 60 "$WXBOT" send --binding "$BINDING" --to "$TO_WXID" --image "$FILE" 2>"$ERR_FILE"
+  timeout 600 "$WXBOT" send --binding "$BINDING" --to "$TO_WXID" --image "$FILE" 2>"$ERR_FILE"
 else
   timeout 60 "$WXBOT" send --binding "$BINDING" --to "$TO_WXID" --text - < "$FILE" 2>"$ERR_FILE"
 fi

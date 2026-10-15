@@ -8,7 +8,8 @@
 - [ ] hook `dry_run`：空收件箱 → `silent`；`count`/`health` 不消费消息
 - [ ] 微信发文字 → 上报到达主会话 → 主会话回复 → 微信收到 → ack
 - [ ] 微信发图片 → 主会话能读取 `media[].path` 并回应图片内容
-- [ ] 主会话发图片/文件到微信（`--image` / `--file`）
+- [ ] 主会话发图片到微信（`--image`；`--file` 走 `wx-bot send` 直接发送，
+  不经过 `wechat-send.sh` 的幂等保护，见教程第 9 节说明）
 - [ ] 连续两条消息 → 按 `ts` 顺序各回各的，不串
 - [ ] 双向事实：主会话的新事实能被微信问答 recall；微信的更正能被主会话记住
 - [ ] alert 事件（如断线）：主会话在主聊天转告用户，不回微信，ack
@@ -30,7 +31,7 @@
 | T6 unknown 拦截与放行 | unknown 事件无参数重调 / 带 `--retry-unknown` 重调 / sent 后重调 | 无参数被拦截（`blocked`，不调 send）；`--retry-unknown` 放行成功记 `sent`；`sent` 后任何重发仍被拒绝 |
 
 参考实现见本仓库 `scripts/test-fault-injection.sh`（`WXBOT_OVERRIDE` 注入点）。
-一次部署的实测：23/23 断言通过（8 组）。
+一次部署的实测：30/30 断言通过（12 组：T1 发送中 kill -9、T2 锁恢复、T2d 锁不抢占活持有者、T2e 孤儿任务不误接管、T3 重复投递、T4 排序机制演示、T5 超时识别、T6 unknown 拦截、T7 第三次调用、T8 并发、T9 预写失败、T10 历史不可读）。
 
 > 测试环境：Ubuntu 24.04.5 LTS、bash 5.2.21、Python 3.12.3、flock (util-linux 2.39.3)；
 > 隔离 HOME=/tmp/wxbot-fault-test，假 wx-bot（hang/ok/timeout/slowcount），

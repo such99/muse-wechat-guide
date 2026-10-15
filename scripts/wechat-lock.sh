@@ -19,6 +19,9 @@
 set -u
 LOCK_DIR="$HOME/hooks/state/wechat-handler.lock"
 LOG="$HOME/hooks/state/wechat-send-log.jsonl"
+# flock 文件：run 模式持有，fd 被子命令继承；外壳被 kill -9 后，
+# 若子命令仍活着，flock 依然被持有，acquire 接管时能探测到。
+LOCK_FLOCK="$(dirname "$LOCK_DIR")/.wechat-handler.flock"
 # 父目录不存在时 mkdir 会失败并被误判为"锁已存在"，先建好。
 mkdir -p "$(dirname "$LOCK_DIR")"
 
@@ -55,6 +58,15 @@ case "${1:?need acquire|release|status|break|run}" in
     ALIVE=0
     if [[ "$HPID" =~ ^[0-9]+$ ]] && kill -0 "$HPID" 2>/dev/null; then ALIVE=1; fi
     if [ "$ALIVE" -eq 0 ]; then
+      # PID 已死，但可能是"外壳被 kill -9、子命令仍活着"：
+      # 探测 flock，若仍被持有说明有孤儿任务在跑，拒绝接管。
+      exec 202>"$LOCK_FLOCK"
+      if ! flock -n 202 2>/dev/null; then
+        echo "HELD by orphaned child (pid $HPID dead but task flock still held); use '$0 break' after manual check" >&2
+        exit 1
+      fi
+      # flock 可获取，无孤儿任务，安全接管（释放探测锁，继续走 pid 文件逻辑）
+      flock -u 202
       rm -rf "$LOCK_DIR"
       mkdir "$LOCK_DIR"
       holder_pid > "$LOCK_DIR/pid"
@@ -113,6 +125,10 @@ EOF
       echo "cannot acquire lock; held by a live holder" >&2
       exit 1
     fi
+    # 持有 flock，fd 被子命令继承：外壳被 kill -9 后若子命令仍活着，
+    # flock 不释放，后续 acquire 能探测到孤儿任务而不误接管。
+    exec 202>"$LOCK_FLOCK"
+    flock 202 || { echo "cannot hold task flock" >&2; exit 1; }
     trap do_release EXIT
     "$@"
     RC=$?

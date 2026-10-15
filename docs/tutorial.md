@@ -28,17 +28,20 @@
 ## 1. 安装 wx-bot
 
 从 GitHub releases 下载对应平台的单文件二进制并校验（以上游文档的命令为准，
-大意）：
+大意）。**固定用已验证的 v0.4.8**，不要用 `latest`（新版本需重新跑回归测试）：
 
 ```bash
 mkdir -p ~/.local/bin && cd ~/.local/bin
 # 按架构拼接 asset 名：wx-bot_linux_amd64 或 wx-bot_linux_arm64（musl 系统加 _musl 后缀）
-curl -fLO https://github.com/lawrencewzen/wx-bot/releases/latest/download/<ASSET>
-curl -fLO https://github.com/lawrencewzen/wx-bot/releases/latest/download/checksums.txt
+curl -fLO https://github.com/lawrencewzen/wx-bot/releases/download/v0.4.8/<ASSET>
+curl -fLO https://github.com/lawrencewzen/wx-bot/releases/download/v0.4.8/checksums.txt
 sha256sum -c --ignore-missing checksums.txt   # 必须通过
 mv <ASSET> wx-bot && chmod 0755 wx-bot
 ~/.local/bin/wx-bot version
 ```
+
+> 升级 wx-bot 版本 = 重新验证：换版本后必须重跑 `scripts/test-fault-injection.sh`
+>（期望 30/30），并按 `docs/testing.md` 做一次真实收发冒烟，再更新此处版本号。
 
 > 上游还提供 `install.sh` 一键安装脚本和 `wx-bot update` 自更新；
 > 本教程用手动下载是为了让你看清每一步装了什么。两种方式装完是一样的。
@@ -175,6 +178,9 @@ chmod +x ~/hooks/scripts/wechat-inbox-watch.sh
 `docs/main-session-playbook.md` 处理（接收→排序→发送→确认→记忆裁决）。
 早报、提醒等定时任务如需发微信，直接调 `wx-bot send`（文件用 `--file`，
 图片用 `--image`）。
+注意：直接调 `wx-bot send` **不经过** `scripts/wechat-send.sh` 的幂等/状态机保护
+（无 sent 历史去重、无 unknown 拦截），重复执行可能重复发送；
+重要通知建议同样走 `wechat-send.sh`（`--tag` 区分不同定时任务）。
 
 ## 常见问题
 

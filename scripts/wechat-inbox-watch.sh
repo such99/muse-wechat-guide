@@ -28,9 +28,20 @@ ERR_DIR="$HOME/hooks/state"
 
 if ! count="$("$WXBOT" inbox count --binding "$BINDING" 2>&1)"; then
   log "wx-bot count failed" "{\"error\": $(printf '%s' "$count" | jq -Rs .)}"
-  silent "wx-bot count 调用失败" '{"needs_attention": true}'
+  # count 自身失败走独立节流告警（配置损坏/binding错误/DB打不开等），
+  # 不能静默：否则持续故障会一直无通知。1小时内只提醒一次，恢复后标记清除。
+  COUNT_MARK="${MARK}.count"
+  if [ -f "$COUNT_MARK" ] && [ -z "$(find "$COUNT_MARK" -mmin +60 2>/dev/null)" ]; then
+    silent "wx-bot count 失败已在1小时内提醒过" '{"binding": "'"$BINDING"'"}'
+    exit 0
+  fi
+  mkdir -p "$(dirname "$COUNT_MARK")"
+  touch "$COUNT_MARK"
+  wake "wx-bot 收件箱查询失败" "{\"binding\": \"$BINDING\", \"error\": $(printf '%s' "$count" | jq -Rs . | head -c 200)}"
   exit 0
 fi
+# count 恢复正常后清除告警标记
+rm -f "${MARK}.count"
 
 if [[ "$count" =~ ^[0-9]+$ ]] && [ "$count" -gt 0 ]; then
   if [ "$DRY" = "1" ]; then

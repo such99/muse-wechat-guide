@@ -98,6 +98,25 @@ OUT=$(./wechat-lock.sh acquire 2>&1); RC=$?
 kill -9 "$HOLDER2" 2>/dev/null; wait 2>/dev/null
 sleep 1
 ./wechat-lock.sh release >/dev/null 2>&1 || ./wechat-lock.sh break >/dev/null 2>&1
+
+echo "================ T2e: 外壳被杀但子任务仍活着，不误接管 ================"
+# 启动 run -- sleep，后台运行；kill -9 外壳，sleep 子进程成孤儿继续持有 flock
+./wechat-lock.sh run -- sleep 30 &
+HOLDER3=$!
+sleep 1
+# 确认锁已持有
+./wechat-lock.sh status | grep -q "held" || bad "T2e setup: 锁未持有"
+kill -9 "$HOLDER3" 2>/dev/null; wait 2>/dev/null
+sleep 1
+# 外壳已死，但 sleep 孤儿仍活着并持有 flock → acquire 应拒绝接管
+OUT=$(./wechat-lock.sh acquire 2>&1); RC=$?
+{ [ "$RC" -eq 1 ] && echo "$OUT" | grep -q "orphaned"; } \
+  && ok "T2e: 孤儿任务持有 flock 时拒绝接管" \
+  || bad "T2e: 应检测到孤儿任务并拒绝 (rc=$RC out=$OUT)"
+# 清理：杀掉孤儿 sleep
+pkill -f "sleep 30" 2>/dev/null
+sleep 1
+./wechat-lock.sh break >/dev/null 2>&1
 # 健康持有：用 run 模式起一个长生命周期持有者（sleep 20），主流程应拒绝
 ./wechat-lock.sh run -- sleep 20 &
 HOLDER=$!
@@ -106,9 +125,11 @@ OUT=$(./wechat-lock.sh acquire 2>&1); RC=$?
 [ "$RC" -eq 1 ] && ok "T2b: 健康持有者占锁时拒绝第二次 acquire（无并发发送）" || bad "T2b: 应拒绝但 rc=$RC"
 kill -9 "$HOLDER" 2>/dev/null; wait 2>/dev/null
 sleep 1
-# 杀掉持有者后锁残留（pid 已死）→ 下一次应能接管，即"锁持有者退出后能恢复"
+# 外壳和子任务都死了（杀掉孤儿 sleep），flock 释放 → 下一次应能接管
+pkill -f "sleep 20" 2>/dev/null; sleep 1
+# 持有者彻底崩溃后锁残留（pid 已死且无孤儿）→ 下一次应能接管
 OUT=$(./wechat-lock.sh acquire 2>&1); RC=$?
-{ [ "$RC" -eq 0 ] && echo "$OUT" | grep -q TAKEOVER; } && ok "T2c: 持有者崩溃后锁可恢复（按 pid 已死接管）" || bad "T2c: 崩溃后未能恢复 (rc=$RC)"
+{ [ "$RC" -eq 0 ] && echo "$OUT" | grep -q TAKEOVER; } && ok "T2c: 持有者彻底崩溃后锁可恢复（按 pid 已死接管）" || bad "T2c: 崩溃后未能恢复 (rc=$RC)"
 ./wechat-lock.sh release >/dev/null 2>&1
 
 echo "================ T3: 同一事件重复投递 ================"
@@ -202,15 +223,25 @@ N=$(wc -l < /tmp/wxbot-invoke-count 2>/dev/null || echo 0)
 
 echo "================ T9: 预写失败时禁止发送 ================"
 # 把日志文件替换成目录，模拟磁盘满/不可写（连 root 也拦得住）
+# 注意：历史检查先于预写，目录导致 ever_sent 失败，走 exit 2（转人工）
 rm -f "$TEST_HOME/hooks/state/wechat-send-log.jsonl"
 mkdir -p "$TEST_HOME/hooks/state/wechat-send-log.jsonl"
 rm -f /tmp/wxbot-fake-invoked
 OUT=$(WXBOT_OVERRIDE="$TEST_HOME/bin/fake-ok" ./wechat-send.sh evt-t9 wxid-test "$TEST_HOME/text.txt" 2>&1); RC=$?
-[ "$RC" -eq 1 ] && ok "T9a: 预写失败时退出码为 1" || bad "T9a: 期望退出码 1，实际 $RC"
-[ ! -f /tmp/wxbot-fake-invoked ] && ok "T9b: 预写失败时未调用 send" || bad "T9b: 预写失败不应发送"
+[ "$RC" -eq 2 ] && ok "T9a: 日志不可用时退出码为 2（转人工）" || bad "T9a: 期望退出码 2，实际 $RC"
+[ ! -f /tmp/wxbot-fake-invoked ] && ok "T9b: 日志不可用时未调用 send" || bad "T9b: 日志不可用不应发送"
 echo "$OUT" | grep -q "FATAL" && ok "T9c: 输出 FATAL 提示" || bad "T9c: 缺少 FATAL 提示 (out=$OUT)"
 # 恢复：删掉目录，日志文件由下次写入自动重建
 rmdir "$TEST_HOME/hooks/state/wechat-send-log.jsonl"
+
+echo "================ T10: 历史不可读时禁止发送 ================"
+# 在日志开头写入非法 UTF-8 字节：Python 扫描失败，但追加仍可写入
+printf '\xff\xfe{"event_id":"evt-t10","state":"sent"}\n' > "$TEST_HOME/hooks/state/wechat-send-log.jsonl"
+rm -f /tmp/wxbot-fake-invoked
+OUT=$(WXBOT_OVERRIDE="$TEST_HOME/bin/fake-ok" ./wechat-send.sh evt-t10 wxid-test "$TEST_HOME/text.txt" 2>&1); RC=$?
+[ "$RC" -eq 2 ] && ok "T10a: 历史不可读时退出码为 2（转人工）" || bad "T10a: 期望退出码 2，实际 $RC"
+[ ! -f /tmp/wxbot-fake-invoked ] && ok "T10b: 历史不可读时未调用 send" || bad "T10b: 历史不可读不应发送"
+echo "$OUT" | grep -q "FATAL" && ok "T10c: 输出 FATAL 提示" || bad "T10c: 缺少 FATAL 提示 (out=$OUT)"
 
 echo
 echo "================ 结果: PASS=$PASS FAIL=$FAIL ================"
