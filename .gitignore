@@ -1,0 +1,21 @@
+# 运行期状态（绝不上库）
+hooks-state/
+*.log
+.env
+wx-bot-qr*.png
+# 事件文件、发送日志、锁
+wechat-events/
+wechat-send-log.jsonl
+# 个人配置与凭据
+config.json
+**/env
+*.key
+*.pem
+# 记忆文件（与 README"不在仓库里的东西"一致）
+MEMORY.md
+memory/
+*.memory.md
+# 媒体缓存
+media/
+outbox/
+__pycache__/
