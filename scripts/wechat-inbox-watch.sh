@@ -79,9 +79,43 @@ print(json.dumps(d, ensure_ascii=False))")"
 fi
 
 if health_out="$("$WXBOT" health --binding "$BINDING" --liveness 2>&1)"; then
-  rm -f "$MARK"
+  rm -f "$MARK" "${MARK}.recover"
   silent "wx-bot 运行正常" '{"binding": "'"$BINDING"'"}'
   exit 0
+fi
+
+# Unhealthy: 先尝试自动恢复（用户已授权"接手微信连接"）。
+# 节流：10 分钟内只尝试一次，避免重装循环。
+RECOVER_MARK="${MARK}.recover"
+if [ ! -f "$RECOVER_MARK" ] || [ -n "$(find "$RECOVER_MARK" -mmin +10 2>/dev/null)" ]; then
+  mkdir -p "$(dirname "$RECOVER_MARK")"
+  touch "$RECOVER_MARK"
+  log "wx-bot unhealthy, attempting auto-recovery" "{\"health\": $(printf '%s' "$health_out" | jq -Rs . | head -c 200)}"
+  if [ ! -f /etc/systemd/system/wx-bot.service ]; then
+    # 单元文件丢失（VM 重启/替换导致 /etc 未持久化）：一键重装
+    if "$HOME/workspace/wx-bot/reinstall-service.sh" >/tmp/wxbot-recover.log 2>&1; then
+      log "wx-bot auto-recovery: reinstall ok" "{}"
+    else
+      log "wx-bot auto-recovery: reinstall failed" "{\"tail\": $(tail -c 300 /tmp/wxbot-recover.log | jq -Rs .)}"
+    fi
+  else
+    # 单元还在但进程没跑：直接 restart（比全量重装快）
+    if systemctl restart wx-bot.service 2>/dev/null; then
+      log "wx-bot auto-recovery: restart ok" "{}"
+    else
+      log "wx-bot auto-recovery: restart failed, trying reinstall" "{}"
+      "$HOME/workspace/wx-bot/reinstall-service.sh" >/tmp/wxbot-recover.log 2>&1 || true
+    fi
+  fi
+  # 恢复后复检：好了就当无事发生，清除告警标记
+  sleep 5
+  if "$WXBOT" health --binding "$BINDING" --liveness >/dev/null 2>&1; then
+    rm -f "$MARK"
+    log "wx-bot auto-recovery: health ok after recovery" "{}"
+    silent "wx-bot 自动恢复成功" '{"binding": "'"$BINDING"'"}'
+    exit 0
+  fi
+  log "wx-bot auto-recovery: still unhealthy after recovery" "{}"
 fi
 
 # Unhealthy: wake once, then at most hourly while it lasts.
