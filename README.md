@@ -1,3 +1,9 @@
+> 🎁 **我的 Muse 邀请码：`SA7JX4`**
+>
+> 注册 Muse 需要邀请码的话，欢迎用我的这一个（App 里：设置 > Redeem token；网页版：设置 > General > Usage > Redeem invite code）。顺手帮个忙，谢谢！
+>
+> 🎁 **My Muse invite code: `SA7JX4`** — if you need an invite code when signing up for Muse, feel free to use mine. Thanks for the support!
+
 # Muse × 微信：云端接入指南（wx-bot 主会话回复方案）
 
 **Connect Muse to WeChat with wx-bot (experimental guide).** 用 wx-bot 云端路线把微信接入 Muse，并解决默认方案对话上下文断裂的问题：事件落盘、防重发、主会话统一回复。⚠️ 实验性方案，依赖 Muse 的 hook 机制，详见下文。
